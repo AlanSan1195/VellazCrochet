@@ -1,0 +1,78 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Catalog from "../components/Catalog";
+import { bags } from "../data/bags";
+
+const count = String(bags.length).padStart(2, "0");
+---
+
+<Layout
+  title="Vellaz Crochet"
+  description="Bolsos de crochet tejidos a mano. Míralos en 3D y elige tu color o combinación favorita."
+>
+  <main class="relative isolate overflow-x-clip">
+    <div class="fixed inset-0 -z-10">
+      <div class="absolute inset-0 -z-10 h-full w-full bg-white bg-[linear-gradient(to_right,#f0f0f0_1px,transparent_1px),linear-gradient(to_bottom,#f0f0f0_1px,transparent_1px)] bg-[size:6rem_4rem]"><div class="absolute bottom-0 left-0 right-0 top-0 bg-[radial-gradient(circle_800px_at_100%_200px,#d5c5ff,transparent)]"></div></div>
+    </div>
+
+    <header class="fixed inset-x-0 top-0 z-30 flex items-center justify-between border-b border-ink/5 bg-white/65 px-4 py-3 backdrop-blur-md md:border-0 md:bg-transparent md:py-4 md:backdrop-blur-none md:px-8">
+      <a href="#inicio" class="font-display text-xl font-semibold tracking-tight text-ink">Vellaz<span class="text-violet">.</span></a>
+      <a href="#catalogo" class="rounded-full border border-ink/15 bg-white/70 px-4 py-2 text-sm text-ink backdrop-blur transition hover:bg-white">Catálogo</a>
+    </header>
+
+    <section id="inicio" class="relative flex min-h-dvh flex-col justify-end px-4 pt-28 pb-14 md:px-8 md:pb-20">
+      <div data-hero class="mx-auto w-full max-w-6xl">
+        <p data-hero-item class="mb-6 text-sm tracking-[0.3em] text-ink/60 uppercase">Vellaz Crochet · {count} modelos</p>
+        <h1 class="font-display text-[15vw] leading-[0.9] font-semibold tracking-tight text-ink md:text-[9.5vw]">
+          <span class="block overflow-hidden pb-[0.06em]"><span data-hero-line class="block">Tejido</span></span>
+          <span class="block overflow-hidden pb-[0.06em]"><span data-hero-line class="block italic font-normal text-violet">a mano,</span></span>
+          <span class="block overflow-hidden pb-[0.06em]"><span data-hero-line class="block">punto a punto.</span></span>
+        </h1>
+        <div class="mt-10 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+          <p data-hero-item class="max-w-md text-lg leading-relaxed text-ink/75">
+            Bolsos de crochet únicos. Gira cada modelo, toca la tela y elige tu color o combinación favorita.
+          </p>
+          <a data-hero-item href="#catalogo" class="group inline-flex items-center gap-3 self-start text-ink md:self-auto">
+            <span class="grid size-12 place-items-center rounded-full bg-ink text-white transition group-hover:translate-y-1" aria-hidden="true">↓</span>
+            Ver catálogo
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <div id="catalogo">
+      <Catalog client:only="react">
+        <p slot="fallback" class="grid min-h-dvh place-items-center text-ink/60">Cargando el catálogo…</p>
+      </Catalog>
+    </div>
+
+    <footer class="relative px-4 py-16 text-center md:px-8">
+      <p class="font-display text-3xl text-ink">Vellaz<span class="text-violet">.</span></p>
+      <p class="mt-2 text-sm text-ink/60">Bolsos de crochet tejidos a mano.</p>
+    </footer>
+  </main>
+</Layout>
+
+<script>
+  import gsap from "gsap";
+  import { ScrollTrigger } from "gsap/ScrollTrigger";
+
+  gsap.registerPlugin(ScrollTrigger);
+  const media = gsap.matchMedia();
+
+  media.add("(prefers-reduced-motion: no-preference)", () => {
+    const intro = gsap.timeline({ defaults: { ease: "power4.out" } });
+    intro
+      .from("[data-hero-line]", { yPercent: 110, duration: 1.1, stagger: 0.12 })
+      .from("[data-hero-item]", { y: 24, autoAlpha: 0, duration: 0.8, stagger: 0.1 }, "-=0.6");
+
+    // Al bajar, la portada se aleja para dejar paso al primer bolso.
+    gsap.to("[data-hero]", {
+      yPercent: -18,
+      scale: 0.92,
+      autoAlpha: 0,
+      ease: "none",
+      scrollTrigger: { trigger: "#inicio", start: "top top", end: "bottom top", scrub: true },
+    });
+  });
+</script>
