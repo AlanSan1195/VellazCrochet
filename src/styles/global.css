@@ -1,0 +1,55 @@
+@import "tailwindcss";
+@import "@fontsource-variable/fraunces";
+@import "@fontsource-variable/dm-sans";
+
+@theme {
+  --font-display: "Fraunces Variable", ui-serif, Georgia, serif;
+  --font-sans: "DM Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-ink: #1f1a2b;
+  --color-violet: #6b55d6;
+}
+
+/* Colores de la combinación elegida, animables entre cambios. */
+@property --tint-a {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --tint-b {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: #ffffff;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Cada sección se tiñe suavemente con los hilos del bolso. */
+.tinted {
+  transition:
+    --tint-a 0.8s ease,
+    --tint-b 0.8s ease;
+  background:
+    radial-gradient(60% 55% at 70% 45%, color-mix(in oklab, var(--tint-a) 30%, transparent), transparent 70%),
+    radial-gradient(50% 45% at 25% 70%, color-mix(in oklab, var(--tint-b) 24%, transparent), transparent 70%);
+}
+
+.ghost-name {
+  color: transparent;
+  -webkit-text-stroke: 1.5px color-mix(in oklab, var(--tint-b) 55%, var(--color-ink) 12%);
+  opacity: 0.35;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
