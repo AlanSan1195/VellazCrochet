@@ -23,7 +23,6 @@ export function OrnamentCharm(props: ExtraModelProps) {
       metalness: 0.25,
       clearcoat: 1,
       clearcoatRoughness: 0.04,
-      iridescence: 0.15,
     });
     const gold = new THREE.MeshPhysicalMaterial({ color: GOLD, metalness: 1, roughness: 0.28 });
 

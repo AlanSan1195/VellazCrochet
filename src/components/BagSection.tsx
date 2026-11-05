@@ -1,13 +1,45 @@
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { useRef, type CSSProperties, type RefObject } from "react";
+import { Suspense, lazy, useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import type { ScrollProgress } from "../three/InteractiveStage";
 import type { BagProduct, Colorway } from "../types/catalog";
 import { ColorwayPicker } from "./ColorwayPicker";
 import { ExtrasToggle } from "./ExtrasToggle";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
+
+/** Three.js y los modelos van en un paquete aparte: el texto y los controles no lo esperan. */
+export const loadBagCanvas = () => import("../three/BagCanvas");
+const BagCanvas = lazy(loadBagCanvas);
+
+/**
+ * El canvas se crea cuando la sección está a pocas pantallas (para tenerlo compilado
+ * antes de verlo) y se libera cuando queda lejos, para no acumular contextos WebGL.
+ * Solo se anima mientras se ve.
+ */
+function useCanvasLifecycle(target: RefObject<HTMLElement | null>) {
+  const [mounted, setMounted] = useState(false);
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    const element = target.current;
+    if (!element) return;
+    const observe = (rootMargin: string, callback: (visible: boolean) => void) => {
+      const observer = new IntersectionObserver(([entry]) => callback(entry!.isIntersecting), { rootMargin });
+      observer.observe(element);
+      return observer;
+    };
+    const observers = [
+      observe("250% 0px", (near) => near && setMounted(true)),
+      observe("600% 0px", (inRange) => !inRange && setMounted(false)),
+      observe("10% 0px", setActive),
+    ];
+    return () => observers.forEach((observer) => observer.disconnect());
+  }, [target]);
+
+  return { mounted, active };
+}
 
 type Props = {
   bag: BagProduct;
@@ -16,6 +48,8 @@ type Props = {
   colorways: Colorway[];
   colorway: Colorway;
   visibleExtraIds: string[];
+  resetSignal: number;
+  reducedMotion: boolean;
   scroll: ScrollProgress;
   track: RefObject<HTMLDivElement | null>;
   onColorway: (colorwayId: string) => void;
@@ -34,6 +68,8 @@ export function BagSection({
   colorways,
   colorway,
   visibleExtraIds,
+  resetSignal,
+  reducedMotion,
   scroll,
   track,
   onColorway,
@@ -43,6 +79,7 @@ export function BagSection({
 }: Props) {
   const section = useRef<HTMLElement>(null);
   const flipped = index % 2 === 1;
+  const canvas = useCanvasLifecycle(track);
 
   useGSAP(
     () => {
@@ -140,7 +177,22 @@ export function BagSection({
           aria-label={`Modelo 3D de ${bag.name} en ${colorway.name}. Arrastra para girarlo y toca la tela.`}
           style={{ touchAction: "pan-y" }}
           className={`relative h-[60svh] cursor-grab active:cursor-grabbing md:col-span-7 md:row-span-3 md:row-start-1 md:h-[80svh] ${flipped ? "md:col-start-1" : "md:col-start-6"}`}
-        />
+        >
+          {canvas.mounted && (
+            <Suspense fallback={null}>
+              <BagCanvas
+                bag={bag}
+                tones={colorway.tones}
+                visibleExtraIds={visibleExtraIds}
+                resetSignal={resetSignal}
+                scroll={scroll}
+                reducedMotion={reducedMotion}
+                track={track}
+                active={canvas.active}
+              />
+            </Suspense>
+          )}
+        </div>
 
         <div
           data-reveal

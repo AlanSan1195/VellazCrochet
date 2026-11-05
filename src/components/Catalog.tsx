@@ -1,26 +1,14 @@
-import { Canvas } from "@react-three/fiber";
-import { View } from "@react-three/drei";
-import { createRef, useMemo, useState } from "react";
-import * as THREE from "three";
+import { createRef, useEffect, useMemo, useState } from "react";
 import { bags } from "../data/bags";
 import { getColorways } from "../data/colorways";
-import { BagView } from "../three/BagView";
 import type { ScrollProgress } from "../three/InteractiveStage";
-import { BagSection } from "./BagSection";
+import { BagSection, loadBagCanvas } from "./BagSection";
 
 type BagState = { colorwayId: string; visibleExtraIds: string[]; resetSignal: number };
 
-function hasWebGL() {
-  try {
-    return Boolean(document.createElement("canvas").getContext("webgl2"));
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Catálogo completo en una isla de React: las secciones son DOM normal y todos los
- * bolsos se dibujan en un único canvas fijo (drei `View`), sin un contexto WebGL por bolso.
+ * Catálogo completo en una isla de React. Las secciones son DOM normal y aparecen al
+ * instante; Three.js llega en un paquete aparte y cada bolso dibuja en su propio canvas.
  */
 export default function Catalog() {
   const catalog = useMemo(
@@ -47,8 +35,10 @@ export default function Catalog() {
     ),
   );
   const [active, setActive] = useState(-1);
-  const [webGLAvailable] = useState(hasWebGL);
   const [reducedMotion] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+  // Mientras se lee la portada se descarga el 3D, para tenerlo listo al llegar al primer bolso.
+  useEffect(() => void loadBagCanvas(), []);
 
   const update = (bagId: string, change: (state: BagState) => Partial<BagState>) =>
     setStates((all) => ({ ...all, [bagId]: { ...all[bagId]!, ...change(all[bagId]!) } }));
@@ -76,12 +66,6 @@ export default function Catalog() {
         </ol>
       </nav>
 
-      {!webGLAvailable && (
-        <p className="mx-auto max-w-md px-4 py-6 text-center text-ink/70">
-          Tu navegador no tiene WebGL activo, así que los bolsos no se pueden ver en 3D.
-        </p>
-      )}
-
       {catalog.map(({ bag, colorways, track, scroll }, index) => {
         const state = states[bag.id]!;
         return (
@@ -93,6 +77,8 @@ export default function Catalog() {
             colorways={colorways}
             colorway={colorways.find((item) => item.id === state.colorwayId)!}
             visibleExtraIds={state.visibleExtraIds}
+            resetSignal={state.resetSignal}
+            reducedMotion={reducedMotion}
             scroll={scroll}
             track={track}
             onColorway={(colorwayId) => update(bag.id, () => ({ colorwayId }))}
@@ -108,33 +94,6 @@ export default function Catalog() {
           />
         );
       })}
-
-      {webGLAvailable && (
-        <Canvas
-          dpr={[1, 2]}
-          gl={{ antialias: true, alpha: true, toneMapping: THREE.NeutralToneMapping }}
-          style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 10 }}
-          aria-hidden="true"
-        >
-          {catalog.map(({ bag, colorways, track, scroll }, index) => {
-            const state = states[bag.id]!;
-            return (
-              <BagView
-                key={bag.id}
-                bag={bag}
-                index={index + 1}
-                tones={colorways.find((item) => item.id === state.colorwayId)!.tones}
-                visibleExtraIds={state.visibleExtraIds}
-                resetSignal={state.resetSignal}
-                scroll={scroll}
-                reducedMotion={reducedMotion}
-                track={track}
-              />
-            );
-          })}
-          <View.Port />
-        </Canvas>
-      )}
     </>
   );
 }

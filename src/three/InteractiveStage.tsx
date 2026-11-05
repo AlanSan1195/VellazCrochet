@@ -33,7 +33,8 @@ const easeOut = (t: number) => 1 - (1 - t) ** 3;
  * En táctil solo se gira en horizontal, para que el scroll vertical siga funcionando.
  */
 export function InteractiveStage({ stage, element, centerY, resetSignal, scroll, reducedMotion, children }: Props) {
-  const { camera } = useThree();
+  // El canvas ocupa exactamente el área del bolso: su tamaño sirve para encuadrar.
+  const { camera, size } = useThree();
   const presentGroup = useRef<THREE.Group>(null);
   const spinGroup = useRef<THREE.Group>(null);
   const modelGroup = useRef<THREE.Group>(null);
@@ -235,8 +236,7 @@ export function InteractiveStage({ stage, element, centerY, resetSignal, scroll,
     depth.value += state.pressVelocity * delta;
 
     // En contenedores verticales se aleja la cámara para que el bolso quepa completo.
-    const rect = element.getBoundingClientRect();
-    const fit = Math.max(1, 0.85 / (rect.width / Math.max(rect.height, 1)));
+    const fit = Math.max(1, 0.85 / (size.width / Math.max(size.height, 1)));
     camera.position.z = THREE.MathUtils.damp(camera.position.z, state.distance * fit, 8, delta);
   });
 

@@ -25,6 +25,6 @@ export const StageContext = createContext<Stage | null>(null);
 
 export function useStage() {
   const stage = useContext(StageContext);
-  if (!stage) throw new Error("useStage debe usarse dentro de BagView");
+  if (!stage) throw new Error("useStage debe usarse dentro de BagCanvas");
   return stage;
 }
