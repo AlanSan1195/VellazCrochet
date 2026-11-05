@@ -7,6 +7,9 @@ export type PressUniforms = {
   uPressRadius: { value: number };
 };
 
+/** Programa de un material justo antes de compilarse (lo que recibe `onBeforeCompile`). */
+export type ShaderSource = Parameters<THREE.Material["onBeforeCompile"]>[0];
+
 export function createPressUniforms(): PressUniforms {
   return {
     uPressPoint: { value: new THREE.Vector3() },
@@ -22,8 +25,8 @@ export function createPressUniforms(): PressUniforms {
  * como el relleno que se desplaza al apretar, y la normal se inclina para que
  * la luz delate la forma.
  */
-export function applySoftPress(material: THREE.Material, uniforms: PressUniforms) {
-  material.onBeforeCompile = (shader) => {
+export function patchSoftPress(shader: ShaderSource, uniforms: PressUniforms) {
+  {
     Object.assign(shader.uniforms, uniforms);
     // De frente un hundimiento casi no cambia la silueta: la sombra es lo que lo revela.
     shader.fragmentShader = shader.fragmentShader
@@ -71,6 +74,5 @@ export function applySoftPress(material: THREE.Material, uniforms: PressUniforms
         mvPosition = modelViewMatrix * mvPosition;
         gl_Position = projectionMatrix * mvPosition;`,
       );
-  };
-  material.customProgramCacheKey = () => "soft-press";
+  }
 }

@@ -2,16 +2,16 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import type { BodyShape } from "../lib/bodyShape";
-import { createFabricMaterial, type YarnFinish } from "../lib/fabric";
+import { createFabricMaterial, createYarnTones, type YarnFinish } from "../lib/fabric";
 import { seededRandom } from "../lib/random";
 import {
-  createInstancedPair,
+  createInstanced,
   createLobe,
   createStitchGeometry,
-  placeLobe,
+  placeBodyStitches,
   placeRope,
   placeTubeStitches,
-  splitByTone,
+  type BodyStitchOptions,
 } from "../lib/stitches";
 import { useStage } from "../stage";
 
@@ -36,43 +36,11 @@ export type BagBlueprint = {
   shape: BodyShape;
   finish: YarnFinish;
   seed: number;
-  body: {
-    rowSpacing: number;
-    stitchSpacing: number;
-    /** Desfase entre hileras: produce las diagonales del tejido. */
-    rowShift: number;
-    stitchScale: number;
-    /** Inclinación de cada puntada respecto a la vertical. */
-    lean: number;
-  };
+  body: BodyStitchOptions;
   handles: (BraidHandle | TubeHandle)[];
 };
 
 const SHELL_SHADE = 0.42;
-
-function buildBodyStitches({ shape, body }: BagBlueprint, random: () => number) {
-  const matrices: THREE.Matrix4[] = [];
-  const meridian = shape.buildMeridianTable();
-  const rows = Math.round(meridian.total / body.rowSpacing);
-
-  for (let row = 1; row <= rows; row++) {
-    const u = meridian.uAtLength((row / rows) * meridian.total * 0.985);
-    const ring = shape.buildRingTable(u);
-    const count = Math.max(4, Math.round(ring.total / body.stitchSpacing));
-    const start = row * body.stitchSpacing * body.rowShift;
-
-    for (let i = 0; i < count; i++) {
-      const length = start + (i / count) * ring.total + (random() - 0.5) * body.stitchSpacing * 0.08;
-      const { point, up, around, normal } = shape.surfaceFrame(u, ring.angleAtLength(length));
-      const lean = body.lean + (random() - 0.5) * 0.14;
-      const along = up.clone().multiplyScalar(Math.cos(lean)).addScaledVector(around, Math.sin(lean));
-      point.addScaledVector(normal, (0.006 + random() * 0.006) * body.stitchScale);
-      const scale = body.stitchScale * (0.98 + random() * 0.08);
-      matrices.push(placeLobe(point, along, normal, scale));
-    }
-  }
-  return matrices;
-}
 
 const mixTones = (tones: string[]) => {
   const color = new THREE.Color(tones[0]);
@@ -91,15 +59,13 @@ export function KnitBag({ blueprint, tones }: Props) {
     const group = new THREE.Group();
     const finish = blueprint.finish;
 
-    const materialA = createFabricMaterial({ hex: "#ffffff", finish, press });
-    const materialB = createFabricMaterial({ hex: "#ffffff", finish, press });
+    // Un solo material para todas las puntadas: los dos hilos se pintan en el shader.
+    const yarnTones = createYarnTones();
+    const material = createFabricMaterial({ hex: "#ffffff", finish, press, tones: yarnTones });
     const shellMaterial = createFabricMaterial({ hex: "#ffffff", finish, press, vertexColors: false });
-    const materials: [THREE.Material, THREE.Material] = [materialA, materialB];
 
-    const stitchSource = createStitchGeometry();
-    const stitch = splitByTone(stitchSource);
-    stitchSource.dispose();
-    group.add(createInstancedPair(stitch, materials, buildBodyStitches(blueprint, random), random));
+    const stitch = createStitchGeometry();
+    group.add(createInstanced(stitch, material, placeBodyStitches(blueprint.shape, blueprint.body, random), random));
 
     const shellGeometry = blueprint.shape.createShellGeometry();
     const shell = new THREE.Mesh(shellGeometry, shellMaterial);
@@ -107,18 +73,9 @@ export function KnitBag({ blueprint, tones }: Props) {
     shell.frustumCulled = false;
     group.add(shell);
 
-    const braidSource = createLobe({ length: 0.06, width: 0.034, thickness: 0.034, bend: 0.25 });
-    const braid = splitByTone(braidSource);
-    braidSource.dispose();
+    const braid = createLobe({ length: 0.06, width: 0.034, thickness: 0.034, bend: 0.25 });
 
-    const disposables: { dispose: () => void }[] = [
-      materialA,
-      materialB,
-      shellMaterial,
-      shellGeometry,
-      ...stitch,
-      ...braid,
-    ];
+    const disposables: { dispose: () => void }[] = [material, shellMaterial, shellGeometry, stitch, braid];
 
     for (const handle of blueprint.handles) {
       const matrices =
@@ -131,7 +88,7 @@ export function KnitBag({ blueprint, tones }: Props) {
               scale: handle.stitchScale,
               random,
             });
-      group.add(createInstancedPair(handle.kind === "braid" ? braid : stitch, materials, matrices, random));
+      group.add(createInstanced(handle.kind === "braid" ? braid : stitch, material, matrices, random));
 
       const core = new THREE.TubeGeometry(handle.curve, 80, handle.radius * 0.72, 10);
       const coreMesh = new THREE.Mesh(core, shellMaterial);
@@ -141,7 +98,7 @@ export function KnitBag({ blueprint, tones }: Props) {
       disposables.push(core);
     }
 
-    return { group, materialA, materialB, shellMaterial, disposables };
+    return { group, yarnTones, shellMaterial, disposables };
   }, [blueprint, press]);
 
   useEffect(() => () => built.disposables.forEach((item) => item.dispose()), [built]);
@@ -157,8 +114,8 @@ export function KnitBag({ blueprint, tones }: Props) {
     targetShell.copy(mixTones(tones));
     const blend = first.done ? 1 - Math.exp(-7 * delta) : 1;
     first.done = true;
-    built.materialA.color.lerp(targetA, blend);
-    built.materialB.color.lerp(targetB, blend);
+    built.yarnTones.uToneA.value.lerp(targetA, blend);
+    built.yarnTones.uToneB.value.lerp(targetB, blend);
     built.shellMaterial.color.lerp(targetShell, blend);
   });
 

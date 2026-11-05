@@ -4,13 +4,12 @@ import * as THREE from "three";
 import type { BagProduct } from "../types/catalog";
 import { DEFAULT_DISTANCE, INITIAL_ROTATION, InteractiveStage, type ScrollProgress } from "./InteractiveStage";
 import { createStudioEnvironment } from "./lib/studioEnvironment";
-import { getYarnTextures } from "./lib/yarnTexture";
+import { COARSE_POINTER } from "./lib/quality";
 import { KnitBag } from "./models/KnitBag";
 import { bagRegistry, extraRegistry } from "./registry";
 import { StageContext, createStage } from "./stage";
 
 /** En móvil una densidad de 1.5 se ve nítida y dibuja la mitad de píxeles que 2 (o 3). */
-const COARSE_POINTER = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
 const DPR: [number, number] = [1, COARSE_POINTER ? 1.5 : 2];
 
 function createShadowTexture() {
@@ -58,9 +57,14 @@ function StudioEnvironment() {
 function Warmup() {
   const { gl, scene, camera } = useThree();
   useEffect(() => {
-    const { albedo, bump } = getYarnTextures();
-    gl.initTexture(albedo);
-    gl.initTexture(bump);
+    const textures = new Set<THREE.Texture>();
+    scene.traverse((object) => {
+      const { material } = object as THREE.Mesh;
+      for (const item of Array.isArray(material) ? material : material ? [material] : []) {
+        for (const value of Object.values(item)) if (value instanceof THREE.Texture) textures.add(value);
+      }
+    });
+    textures.forEach((texture) => gl.initTexture(texture));
     gl.compileAsync(scene, camera).catch(() => {});
   }, [gl, scene, camera]);
   return null;

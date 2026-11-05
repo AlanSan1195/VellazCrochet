@@ -1,5 +1,10 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import type { BodyShape } from "./bodyShape";
+import { COARSE_POINTER } from "./quality";
+
+/** Vueltas y anillos de cada lóbulo: más suave en escritorio, donde se ve de cerca. */
+const LOBE_SEGMENTS: [number, number] = COARSE_POINTER ? [11, 7] : [16, 10];
 
 type LobeOptions = {
   /** Semilongitud (eje Y), semiancho (X) y semigrosor (Z). */
@@ -13,7 +18,7 @@ type LobeOptions = {
   segments?: [number, number];
   /** Sombra horneada en la parte que queda contra el tejido. */
   ambientFloor?: number;
-  /** Vueltas de la espiral que separa los dos hilos de una puntada bicolor. */
+  /** Vueltas de la espiral que separa los dos hilos de una puntada bicolor (atributo `spiral`). */
   stripeTurns?: number;
 };
 
@@ -23,9 +28,9 @@ export function createLobe({
   width,
   thickness,
   bend = 0,
-  pleats = 5,
-  pleatDepth = 0.07,
-  segments = [10, 7],
+  pleats = 4,
+  pleatDepth = 0.06,
+  segments = LOBE_SEGMENTS,
   ambientFloor = 0.56,
   stripeTurns = 1.5,
 }: LobeOptions) {
@@ -34,8 +39,9 @@ export function createLobe({
   geometry.rotateY(-Math.PI / 2);
 
   const position = geometry.getAttribute("position");
+  const uv = geometry.getAttribute("uv");
   const colors = new Float32Array(position.count * 3);
-  const tones = new Float32Array(position.count);
+  const spirals = new Float32Array(position.count);
   for (let i = 0; i < position.count; i++) {
     const x = position.getX(i);
     const y = position.getY(i);
@@ -52,12 +58,12 @@ export function createLobe({
     const shade = THREE.MathUtils.lerp(ambientFloor, 1, facing) * (0.94 + 0.06 * crease);
     colors.set([shade, shade, shade], i * 3);
 
-    // Dos hilos enrollados juntos: bandas en espiral a lo largo del lóbulo.
-    const spiral = ((y + 1) / 2) * stripeTurns + angle / (Math.PI * 2);
-    tones[i] = spiral - Math.floor(spiral) < 0.5 ? 0 : 1;
+    // Dos hilos enrollados juntos: bandas en espiral a lo largo del lóbulo. Se toma de
+    // las UV, que son continuas dentro de cada triángulo (el ángulo salta en la costura).
+    spirals[i] = uv.getY(i) * stripeTurns + uv.getX(i);
   }
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geometry.setAttribute("tone", new THREE.BufferAttribute(tones, 1));
+  geometry.setAttribute("spiral", new THREE.BufferAttribute(spirals, 1));
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -153,6 +159,44 @@ export function placeRope(
   return matrices;
 }
 
+export type BodyStitchOptions = {
+  rowSpacing: number;
+  stitchSpacing: number;
+  /** Desfase entre hileras: produce las diagonales del tejido. */
+  rowShift: number;
+  stitchScale: number;
+  /** Inclinación de cada puntada respecto a la vertical. */
+  lean: number;
+  /** Grosor relativo: en superficies muy curvas las puntadas se aplanan para no abrirse. */
+  thickness?: number;
+};
+
+/** Hileras de puntadas sobre una superficie, de la base a la boca, repartidas por longitud. */
+export function placeBodyStitches(shape: BodyShape, body: BodyStitchOptions, random: () => number) {
+  const matrices: THREE.Matrix4[] = [];
+  const meridian = shape.buildMeridianTable();
+  const rows = Math.round(meridian.total / body.rowSpacing);
+
+  for (let row = 1; row <= rows; row++) {
+    const u = meridian.uAtLength((row / rows) * meridian.total * 0.985);
+    const ring = shape.buildRingTable(u);
+    const count = Math.max(4, Math.round(ring.total / body.stitchSpacing));
+    const start = row * body.stitchSpacing * body.rowShift;
+
+    for (let i = 0; i < count; i++) {
+      const length = start + (i / count) * ring.total + (random() - 0.5) * body.stitchSpacing * 0.08;
+      const { point, up, around, normal } = shape.surfaceFrame(u, ring.angleAtLength(length));
+      const lean = body.lean + (random() - 0.5) * 0.14;
+      const along = up.clone().multiplyScalar(Math.cos(lean)).addScaledVector(around, Math.sin(lean));
+      point.addScaledVector(normal, (0.006 + random() * 0.006) * body.stitchScale);
+      const size = body.stitchScale * (0.98 + random() * 0.08);
+      const scale = new THREE.Vector3(size, size, size * (body.thickness ?? 1));
+      matrices.push(placeLobe(point, along, normal, scale));
+    }
+  }
+  return matrices;
+}
+
 /** Crea el `InstancedMesh` listo para usar. No participa en el raycast: usa proxies. */
 export function createInstanced(
   geometry: THREE.BufferGeometry,
@@ -174,66 +218,6 @@ export function createInstanced(
   mesh.frustumCulled = false;
   mesh.raycast = () => {};
   return mesh;
-}
-
-/**
- * Separa una geometría en los triángulos de cada hilo (atributo `tone`), para
- * pintar cada parte con su propio material sin shaders especiales.
- */
-export function splitByTone(geometry: THREE.BufferGeometry): [THREE.BufferGeometry, THREE.BufferGeometry] {
-  const flat = geometry.index ? geometry.toNonIndexed() : geometry.clone();
-  const tone = flat.getAttribute("tone");
-  const names = Object.keys(flat.attributes).filter((name) => name !== "tone");
-  const buckets: Record<string, number[]>[] = [{}, {}];
-  for (const bucket of buckets) for (const name of names) bucket[name] = [];
-
-  for (let vertex = 0; vertex < tone.count; vertex += 3) {
-    const average = (tone.getX(vertex) + tone.getX(vertex + 1) + tone.getX(vertex + 2)) / 3;
-    const bucket = buckets[average >= 0.5 ? 1 : 0]!;
-    for (const name of names) {
-      const attribute = flat.getAttribute(name);
-      for (let k = 0; k < 3; k++) {
-        for (let c = 0; c < attribute.itemSize; c++) {
-          bucket[name]!.push(attribute.getComponent(vertex + k, c));
-        }
-      }
-    }
-  }
-  flat.dispose();
-
-  return buckets.map((bucket) => {
-    const part = new THREE.BufferGeometry();
-    for (const name of names) {
-      const itemSize = geometry.getAttribute(name).itemSize;
-      part.setAttribute(name, new THREE.Float32BufferAttribute(bucket[name]!, itemSize));
-    }
-    return part;
-  }) as [THREE.BufferGeometry, THREE.BufferGeometry];
-}
-
-/**
- * Las dos partes de un hilo bicolor comparten matrices y variación de tono, así
- * que se ven como una sola puntada. En los bolsos de un color ambas usan el mismo tono.
- */
-export function createInstancedPair(
-  [geometryA, geometryB]: [THREE.BufferGeometry, THREE.BufferGeometry],
-  [materialA, materialB]: [THREE.Material, THREE.Material],
-  matrices: THREE.Matrix4[],
-  random: () => number,
-) {
-  const seed = Math.floor(random() * 1e9);
-  const group = new THREE.Group();
-  group.add(createInstanced(geometryA, materialA, matrices, seededLike(seed)));
-  group.add(createInstanced(geometryB, materialB, matrices, seededLike(seed)));
-  return group;
-}
-
-function seededLike(seed: number) {
-  let state = seed >>> 0;
-  return () => {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    return state / 4294967296;
-  };
 }
 
 type TubeStitchOptions = {
