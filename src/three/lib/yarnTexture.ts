@@ -24,11 +24,14 @@ const between = (random: () => number, [min, max]: [number, number]) => min + (m
 
 /** Ruido de valor que se repite con periodo entero: la textura no deja costuras. */
 function createTileNoise(seed: number) {
+  // Hash entero: se llama millones de veces y es mucho más rápido que el clásico seno.
   const hash = (x: number, y: number, periodX: number, periodY: number) => {
     const px = ((x % periodX) + periodX) % periodX;
     const py = ((y % periodY) + periodY) % periodY;
-    const h = Math.sin(px * 127.1 + py * 311.7 + seed * 74.7) * 43758.5453;
-    return h - Math.floor(h);
+    let h = Math.imul(px, 0x27d4eb2d) ^ Math.imul(py + seed * 1013, 0x165667b1);
+    h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+    h ^= h >>> 13;
+    return (h >>> 0) / 4294967296;
   };
   /** `x` e `y` van de 0 a su periodo (frecuencia entera) para que el borde empalme. */
   return (x: number, y: number, periodX: number, periodY = periodX) => {
@@ -73,22 +76,30 @@ function createFiberLayer(random: () => number, options: FiberOptions) {
     const bend = (random() - 0.5) * (stray ? 0.12 : 0.05);
     const length = between(random, options.length) * PX;
     const radius = Math.max(between(random, options.width) * PX * 0.5, 0.75);
+    const radiusSquared = radius * radius;
     const strength = 0.45 + 0.55 * random();
     const step = radius * 0.6;
     const reach = Math.ceil(radius + 1);
 
     for (let t = 0; t < length; t += step) {
       const taper = Math.sin((Math.PI * t) / length) ** 0.5 * strength;
+      // La fibra puede salirse del borde: se envuelve, porque la textura se repite.
+      x = ((x % SIZE) + SIZE) % SIZE;
+      y = ((y % SIZE) + SIZE) % SIZE;
       const cx = Math.floor(x);
       const cy = Math.floor(y);
       for (let oy = -reach; oy <= reach; oy++) {
+        const dy = cy + oy + 0.5 - y;
+        let py = cy + oy;
+        if (py < 0) py += SIZE;
+        else if (py >= SIZE) py -= SIZE;
         for (let ox = -reach; ox <= reach; ox++) {
           const dx = cx + ox + 0.5 - x;
-          const dy = cy + oy + 0.5 - y;
-          const inside = 1 - (dx * dx + dy * dy) / (radius * radius);
+          const inside = 1 - (dx * dx + dy * dy) / radiusSquared;
           if (inside <= 0) continue;
-          const px = (((cx + ox) % SIZE) + SIZE) % SIZE;
-          const py = (((cy + oy) % SIZE) + SIZE) % SIZE;
+          let px = cx + ox;
+          if (px < 0) px += SIZE;
+          else if (px >= SIZE) px -= SIZE;
           const index = py * SIZE + px;
           const height = Math.sqrt(inside) * taper;
           if (height > layer[index]!) layer[index] = height;
@@ -104,37 +115,73 @@ function createFiberLayer(random: () => number, options: FiberOptions) {
 
 type Sample = { height: number; albedo: number; roughness: number; fuzz: number };
 
-/**
- * Trapillo (tira de camiseta): columnas de puntos de jersey en "V" a lo largo de la
- * tira, pliegues anchos de la tela enrollada y la pelusa de algodón por encima.
- */
-function sampleJersey(noise: ReturnType<typeof createTileNoise>) {
-  const COLUMNS = 40;
-  const ROWS = 30;
-  return (u: number, v: number, fiber: number): Sample => {
-    const wobble = (noise(u * 10, v * 10, 10) - 0.5) * 0.25;
-    const cx = u * COLUMNS + wobble;
-    const fx = fract(cx) - 0.5;
-    const fy = fract(v * ROWS + (Math.floor(cx) % 2) * 0.5);
-    // Las dos patas de la V se separan hacia arriba y se juntan abajo.
-    const legX = 0.08 + 0.28 * fy;
-    const leg = Math.exp(-(((Math.abs(fx) - legX) / 0.15) ** 2));
-    const loop = leg * (0.55 + 0.45 * Math.sin(Math.PI * fy));
+/** Inclinación de cada pata de la V respecto al eje del hilo. */
+const LEG_TILT = 0.5;
+const LEG_AXIS = { x: Math.sin(LEG_TILT), y: Math.cos(LEG_TILT) };
 
-    // La tira se enrolla sobre sí misma: pliegues largos a lo largo y alguna arruga.
-    const folds = noise(u * 3, v * 1, 3, 1) * 0.6 + noise(u * 7, v * 2, 7, 2) * 0.4;
-    const crease = Math.exp(-(((fract(u * 2 + (noise(u * 2, v * 2, 2) - 0.5) * 0.3) - 0.5) / 0.16) ** 2));
+/**
+ * Relieve de una puntada de jersey: dos patas ovaladas que se juntan abajo y se abren
+ * arriba, como una V. `x` va en anchos de columna (centrado en 0) e `y` en alturas de
+ * vuelta; las patas pasan de una vuelta a la siguiente, por eso se miran las vecinas.
+ */
+function knitLoops(x: number, y: number) {
+  // Una columna es más ancha que alta: se mide en las mismas unidades en los dos ejes.
+  const px = x * 1.4;
+  let best = 0;
+  for (let row = -1; row <= 1; row++) {
+    const py = y - row;
+    for (let side = -1; side <= 1; side += 2) {
+      const dx = px - side * 0.3;
+      const along = (dx * side * LEG_AXIS.x + py * LEG_AXIS.y) / 0.66;
+      const across = (dx * LEG_AXIS.y - py * side * LEG_AXIS.x) / 0.27;
+      const inside = 1 - along * along - across * across;
+      if (inside <= 0) continue;
+      // La punta de arriba se mete bajo la vuelta siguiente: queda un poco más baja.
+      const height = Math.sqrt(inside) * (0.88 - 0.12 * along);
+      if (height > best) best = height;
+    }
+  }
+  return best;
+}
+
+/**
+ * Hilo tejido (trapillo o lana en tubo): cada hebra es un tubito de punto de jersey,
+ * con columnas de V diminutas a lo largo, huecos en sombra entre las patas, fibras
+ * claras y oscuras mezcladas (jaspeado) y pelusa por encima.
+ */
+function sampleJersey(noise: ReturnType<typeof createTileNoise>, darkFibers: Float32Array) {
+  // Columnas alrededor de la hebra y vueltas a lo largo: de frente se ven unas doce V.
+  const COLUMNS = 24;
+  const ROWS = 22;
+  return (u: number, v: number, fiber: number, index: number): Sample => {
+    // Las columnas no son rectas del todo: el hilo se tuerce y las puntadas varían.
+    const cx = u * COLUMNS + (noise(u * 5, v * 3, 5, 3) - 0.5) * 0.5;
+    const cy = v * ROWS + (noise(u * 4, v * 9, 4, 9) - 0.5) * 0.35;
+    // En las puntas de cada hebra (los polos de la UV) las columnas se juntan en una
+    // estrella: ahí el punto se desvanece y solo queda la pelusa.
+    const pole = smooth(Math.min(v / 0.3, (1 - v) / 0.3, 1));
+    const knit = knitLoops(fract(cx) - 0.5, fract(cy) - 0.5) * pole + 0.6 * (1 - pole);
+    // Cada puntada queda un poco más o menos apretada que la vecina.
+    const stitch = noise(Math.floor(cx) + 0.5, Math.floor(cy) * 0.37 + 0.5, COLUMNS, ROWS);
+
+    const folds = noise(u * 3, v * 2, 3, 2);
     const mottle = noise(u * 4, v * 4, 4);
-    // Zonas más y menos gastadas: la pelusa no es pareja en toda la tira.
     const wear = noise(u * 6, v * 3, 6, 3);
+    const dark = darkFibers[index]!;
+    // Hebras finas a lo largo del hilo, algunas más claras y otras más oscuras.
+    const streak = noise(u * 160, v * 12, 160, 12);
 
     return {
-      height: loop * 0.18 + folds * 0.55 - crease * 0.16 + fiber * 0.09,
-      // Las fibras atrapan luz y se ven un poco más claras; entre ellas queda algo de sombra.
+      height: knit * (0.42 + 0.12 * stitch) + folds * 0.22 + fiber * 0.15 + dark * 0.08,
       albedo:
-        (0.94 + 0.06 * loop) * (0.95 + 0.05 * mottle) * (1 - 0.06 * crease) * (0.965 + 0.05 * fiber),
-      roughness: 0.88 + 0.08 * (1 - loop) + 0.04 * fiber,
-      fuzz: (0.35 + 0.65 * fiber) * (0.75 + 0.25 * wear),
+        (0.8 + 0.2 * Math.min(knit * 1.6, 1)) *
+        (0.95 + 0.05 * mottle) *
+        (0.96 + 0.08 * stitch) *
+        (0.9 + 0.2 * streak) *
+        (1 + 0.22 * fiber) *
+        (1 - 0.22 * dark),
+      roughness: 0.9 + 0.06 * (1 - knit) + 0.04 * fiber,
+      fuzz: (0.3 + 0.7 * Math.max(fiber, dark * 0.6)) * (0.7 + 0.3 * wear),
     };
   };
 }
@@ -164,10 +211,16 @@ function sampleSatin(noise: ReturnType<typeof createTileNoise>) {
 
 const FIBERS: Record<YarnFinish, FiberOptions> = {
   // Algodón cepillado: mucha pelusa corta, bastante revuelta.
-  jersey: { count: 4200, length: [10, 32], width: [1.6, 2.4], spread: 0.4, stray: 0.12 },
+  jersey: { count: 5200, length: [10, 32], width: [1.6, 2.4], spread: 0.4, stray: 0.12 },
   // Cinta: pocos filamentos, largos y casi rectos.
   satin: { count: 700, length: [24, 70], width: [1.8, 2.6], spread: 0.12, stray: 0.04 },
 };
+
+/** Fibras de un tono más oscuro, mezcladas con las claras: el jaspeado del hilo. */
+const DARK_FIBERS: FiberOptions = { count: 2000, length: [8, 26], width: [1.4, 2.2], spread: 0.5, stray: 0.15 };
+
+/** Brillo medio del albedo: el relieve oscurece los huecos, pero el color no debe cambiar. */
+const MEAN_ALBEDO = 0.93;
 
 function createDataTexture(data: Uint8Array, colorSpace: THREE.ColorSpace) {
   const texture = new THREE.DataTexture(data, SIZE, SIZE, THREE.RGBAFormat);
@@ -191,29 +244,39 @@ export function getYarnTextures(finish: YarnFinish): YarnTextures {
 
   const seed = finish === "jersey" ? 7 : 19;
   const noise = createTileNoise(seed);
-  const sample = finish === "jersey" ? sampleJersey(noise) : sampleSatin(noise);
-  const fibers = createFiberLayer(seededRandom(seed * 977), FIBERS[finish]);
-  const strength = finish === "jersey" ? 2.6 : 1.8;
+  const random = seededRandom(seed * 977);
+  const fibers = createFiberLayer(random, FIBERS[finish]);
+  const sample =
+    finish === "jersey" ? sampleJersey(noise, createFiberLayer(random, DARK_FIBERS)) : sampleSatin(noise);
+  const strength = finish === "jersey" ? 2.8 : 1.8;
 
   const heights = new Float32Array(SIZE * SIZE);
-  const albedo = new Uint8Array(SIZE * SIZE * 4);
+  const shades = new Float32Array(SIZE * SIZE);
   const roughness = new Uint8Array(SIZE * SIZE * 4);
+  let shadeSum = 0;
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
       const index = y * SIZE + x;
-      const texel = sample(x / SIZE, y / SIZE, fibers[index]!);
+      const texel = sample(x / SIZE, y / SIZE, fibers[index]!, index);
       heights[index] = texel.height;
-      const shade = toByte(texel.albedo);
-      albedo[index * 4] = shade;
-      albedo[index * 4 + 1] = shade;
-      albedo[index * 4 + 2] = shade;
-      albedo[index * 4 + 3] = 255;
+      shades[index] = texel.albedo;
+      shadeSum += texel.albedo;
       const rough = toByte(texel.roughness);
       roughness[index * 4] = rough;
       roughness[index * 4 + 1] = rough;
       roughness[index * 4 + 2] = toByte(texel.fuzz);
       roughness[index * 4 + 3] = 255;
     }
+  }
+
+  const albedo = new Uint8Array(SIZE * SIZE * 4);
+  const gain = MEAN_ALBEDO / (shadeSum / shades.length);
+  for (let index = 0; index < shades.length; index++) {
+    const shade = toByte(shades[index]! * gain);
+    albedo[index * 4] = shade;
+    albedo[index * 4 + 1] = shade;
+    albedo[index * 4 + 2] = shade;
+    albedo[index * 4 + 3] = 255;
   }
 
   // Normales a partir de las alturas, con diferencias centrales que dan la vuelta al borde.

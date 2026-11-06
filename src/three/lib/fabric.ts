@@ -72,7 +72,8 @@ function patchYarn(shader: ShaderSource, tones: YarnTones | undefined) {
       "#include <uv_vertex>",
       `#include <uv_vertex>
       #ifdef USE_INSTANCING
-        vec2 yarnJitter = fract(instanceMatrix[3].xy * vec2(17.13, 23.71) + instanceMatrix[3].zx * vec2(9.37, 5.53));
+        // Solo alrededor de la hebra: a lo largo, la textura debe coincidir con las puntas.
+        vec2 yarnJitter = vec2(fract(dot(instanceMatrix[3].xyz, vec3(17.13, 23.71, 9.37))), 0.0);
         ${jitter("vMapUv", "USE_MAP")}
         ${jitter("vNormalMapUv", "USE_NORMALMAP")}
         ${jitter("vRoughnessMapUv", "USE_ROUGHNESSMAP")}

@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { createFabricMaterial } from "../lib/fabric";
+import { createFuzz } from "../lib/fuzz";
 import { seededRandom } from "../lib/random";
 import { createInstanced, createLobe, placeLobe } from "../lib/stitches";
 import type { ExtraModelProps } from "../registry";
@@ -95,16 +96,17 @@ export function FlowerCharm(props: ExtraModelProps) {
     const material = createFabricMaterial({ hex });
     const backingMaterial = createFabricMaterial({ hex, vertexColors: false, side: THREE.DoubleSide });
     backingMaterial.color.multiplyScalar(0.55);
+    const fuzz = createFuzz({ hex, seed: 29 });
 
     const puffGeometry = createLobe({ length: 0.112, width: 0.035, thickness: 0.044, bend: 0.25, pleats: 3, segments: [12, 8] });
     const chainGeometry = createLobe({ length: 0.024, width: 0.016, thickness: 0.016, pleatDepth: 0.03, segments: [8, 5], ambientFloor: 0.65 });
     const backingGeometry = createBacking(center);
 
-    group.add(createInstanced(puffGeometry, material, buildPuffs(center), random));
-    group.add(createInstanced(chainGeometry, material, buildChain(center), random));
+    group.add(fuzz.grow(createInstanced(puffGeometry, material, buildPuffs(center), random)));
+    group.add(fuzz.grow(createInstanced(chainGeometry, material, buildChain(center), random)));
     group.add(new THREE.Mesh(backingGeometry, backingMaterial));
 
-    return { group, disposables: [material, backingMaterial, puffGeometry, chainGeometry, backingGeometry] };
+    return { group, disposables: [material, backingMaterial, puffGeometry, chainGeometry, backingGeometry, fuzz] };
   }, [hex]);
 
   useEffect(() => () => flower.disposables.forEach((item) => item.dispose()), [flower]);

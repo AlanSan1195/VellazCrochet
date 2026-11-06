@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { createBodyShape } from "../lib/bodyShape";
 import { createFabricMaterial } from "../lib/fabric";
+import { createFuzz } from "../lib/fuzz";
 import { seededRandom } from "../lib/random";
 import { createInstanced, createStitchGeometry, placeBodyStitches } from "../lib/stitches";
 import type { ExtraModelProps } from "../registry";
@@ -48,9 +49,10 @@ export function OrnamentCharm(props: ExtraModelProps) {
     const yarn = createFabricMaterial({ hex, finish: "satin" });
     const filling = createFabricMaterial({ hex, finish: "satin", vertexColors: false });
     filling.color.multiplyScalar(0.4);
+    const fuzz = createFuzz({ hex, finish: "satin", seed: 59 });
 
     const stitchGeometry = createStitchGeometry();
-    const stitches = createInstanced(stitchGeometry, yarn, placeBodyStitches(sphere, STITCHES, random), random);
+    const stitches = fuzz.grow(createInstanced(stitchGeometry, yarn, placeBodyStitches(sphere, STITCHES, random), random));
     stitches.position.y = centerY;
 
     const fillingGeometry = new THREE.SphereGeometry(RADIUS * 0.97, 32, 20);
@@ -77,7 +79,7 @@ export function OrnamentCharm(props: ExtraModelProps) {
     group.add(core, stitches, cap, ring);
     return {
       group,
-      disposables: [yarn, filling, gold, stitchGeometry, fillingGeometry, capGeometry, ringGeometry],
+      disposables: [yarn, filling, gold, stitchGeometry, fillingGeometry, capGeometry, ringGeometry, fuzz],
     };
   }, [hex]);
 

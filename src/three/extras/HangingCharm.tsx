@@ -2,6 +2,7 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 import { createFabricMaterial, type YarnFinish } from "../lib/fabric";
+import { createFuzz } from "../lib/fuzz";
 import { settlePendulum, stepPendulum, type PendulumConfig, type PendulumState } from "../lib/pendulum";
 import { seededRandom } from "../lib/random";
 import { createInstanced, createLobe, placeLobe, placeRope } from "../lib/stitches";
@@ -44,6 +45,7 @@ export function HangingCharm({
   const parts = useMemo(() => {
     const random = seededRandom(41);
     const material = createFabricMaterial({ hex: cord.hex, finish: cord.finish });
+    const fuzz = createFuzz({ hex: cord.hex, finish: cord.finish, seed: 43 });
     const loopGeometry = createLobe({ length: 0.024, width: 0.016, thickness: 0.016, pleatDepth: 0.03, segments: [8, 5], ambientFloor: 0.65 });
     const cordGeometry = createLobe({ length: 0.036, width: 0.019, thickness: 0.02, pleats: 3, segments: [8, 5], ambientFloor: 0.65 });
 
@@ -56,14 +58,11 @@ export function HangingCharm({
       const tangent = new THREE.Vector3(-Math.sin(a), Math.cos(a) * 0.55 + (i % 2 === 0 ? 0.4 : -0.4), Math.cos(a));
       loopMatrices.push(placeLobe(loopCenter.clone().addScaledVector(out, loop.radius), tangent, out, loop.scale));
     }
-    const fixed = createInstanced(loopGeometry, material, loopMatrices, random);
+    const fixed = fuzz.grow(createInstanced(loopGeometry, material, loopMatrices, random));
 
     const cordCurve = new THREE.LineCurve3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -cord.length, 0));
-    const cordMesh = createInstanced(
-      cordGeometry,
-      material,
-      placeRope(cordCurve, { radius: cord.radius, step: 0.028, random }),
-      random,
+    const cordMesh = fuzz.grow(
+      createInstanced(cordGeometry, material, placeRope(cordCurve, { radius: cord.radius, step: 0.028, random }), random),
     );
 
     const proxyGeometry = new THREE.SphereGeometry(pokeRadius, 10, 8);
@@ -71,7 +70,7 @@ export function HangingCharm({
     const proxy = new THREE.Mesh(proxyGeometry);
     proxy.visible = false;
 
-    return { fixed, cordMesh, proxy, disposables: [material, loopGeometry, cordGeometry, proxyGeometry] };
+    return { fixed, cordMesh, proxy, disposables: [material, loopGeometry, cordGeometry, proxyGeometry, fuzz] };
   }, [cord.finish, cord.hex, cord.length, cord.radius, loop.radius, loop.scale, pokeRadius, rodLength]);
 
   useEffect(() => () => parts.disposables.forEach((item) => item.dispose()), [parts]);

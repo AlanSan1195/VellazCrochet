@@ -51,6 +51,7 @@ export function patchSoftPress(shader: ShaderSource, uniforms: PressUniforms) {
           return exp(-d2 / r2) - 0.2 * exp(-d2 / (r2 * 3.2));
         }`,
       )
+      // Solo en materiales con normales (las fibras de pelusa son líneas y no tienen).
       .replace(
         "#include <defaultnormal_vertex>",
         `#include <defaultnormal_vertex>
@@ -60,7 +61,6 @@ export function patchSoftPress(shader: ShaderSource, uniforms: PressUniforms) {
         #endif
         vec3 pressOffset = (pressLocal - uPressPoint) / uPressRadius;
         float pressFade = exp(-dot(pressOffset, pressOffset));
-        vPressShade = clamp(pressFade * uPressDepth * 3.2, 0.0, 0.5);
         transformedNormal = normalize(transformedNormal)
           - normalMatrix * pressOffset * pressFade * uPressDepth * 7.0;`,
       )
@@ -70,6 +70,8 @@ export function patchSoftPress(shader: ShaderSource, uniforms: PressUniforms) {
         #ifdef USE_INSTANCING
           mvPosition = instanceMatrix * mvPosition;
         #endif
+        vec3 pressShadeOffset = (mvPosition.xyz - uPressPoint) / uPressRadius;
+        vPressShade = clamp(exp(-dot(pressShadeOffset, pressShadeOffset)) * uPressDepth * 3.2, 0.0, 0.5);
         mvPosition.xyz += uPressDir * uPressDepth * softPressFalloff(mvPosition.xyz);
         mvPosition = modelViewMatrix * mvPosition;
         gl_Position = projectionMatrix * mvPosition;`,

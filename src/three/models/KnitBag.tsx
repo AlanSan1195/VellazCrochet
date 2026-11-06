@@ -3,6 +3,7 @@ import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import type { BodyShape } from "../lib/bodyShape";
 import { createFabricMaterial, createYarnTones, type YarnFinish } from "../lib/fabric";
+import { createFuzz } from "../lib/fuzz";
 import { seededRandom } from "../lib/random";
 import {
   createInstanced,
@@ -63,9 +64,11 @@ export function KnitBag({ blueprint, tones }: Props) {
     const yarnTones = createYarnTones();
     const material = createFabricMaterial({ hex: "#ffffff", finish, press, tones: yarnTones });
     const shellMaterial = createFabricMaterial({ hex: "#ffffff", finish, press, vertexColors: false });
+    // Pelusa con los mismos colores (y hundimiento) que las puntadas.
+    const fuzz = createFuzz({ finish, tones: yarnTones, press, seed: blueprint.seed * 31 + 7 });
 
     const stitch = createStitchGeometry();
-    group.add(createInstanced(stitch, material, placeBodyStitches(blueprint.shape, blueprint.body, random), random));
+    group.add(fuzz.grow(createInstanced(stitch, material, placeBodyStitches(blueprint.shape, blueprint.body, random), random)));
 
     const shellGeometry = blueprint.shape.createShellGeometry();
     const shell = new THREE.Mesh(shellGeometry, shellMaterial);
@@ -75,7 +78,7 @@ export function KnitBag({ blueprint, tones }: Props) {
 
     const braid = createLobe({ length: 0.06, width: 0.034, thickness: 0.034, bend: 0.25 });
 
-    const disposables: { dispose: () => void }[] = [material, shellMaterial, shellGeometry, stitch, braid];
+    const disposables: { dispose: () => void }[] = [material, shellMaterial, shellGeometry, stitch, braid, fuzz];
 
     for (const handle of blueprint.handles) {
       const matrices =
@@ -88,7 +91,7 @@ export function KnitBag({ blueprint, tones }: Props) {
               scale: handle.stitchScale,
               random,
             });
-      group.add(createInstanced(handle.kind === "braid" ? braid : stitch, material, matrices, random));
+      group.add(fuzz.grow(createInstanced(handle.kind === "braid" ? braid : stitch, material, matrices, random)));
 
       const core = new THREE.TubeGeometry(handle.curve, 80, handle.radius * 0.72, 10);
       const coreMesh = new THREE.Mesh(core, shellMaterial);
