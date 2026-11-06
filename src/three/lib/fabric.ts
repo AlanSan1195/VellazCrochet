@@ -27,23 +27,27 @@ type FabricOptions = {
 };
 
 const FINISHES: Record<YarnFinish, THREE.MeshPhysicalMaterialParameters> = {
-  // Algodón: mate, con un brillo aterciopelado en los bordes que da la pelusa.
+  // Algodón: difuso de tela (EON) y casi sin reflejo; la pelusa da un halo aterciopelado
+  // del color del hilo hacia los bordes, en vez del brillo blanco de un plástico.
   jersey: {
     roughness: 1,
+    diffuseRoughness: 0.8,
+    specularIntensity: 0.25,
     normalScale: new THREE.Vector2(0.85, 0.85),
     sheen: 1,
-    sheenRoughness: 0.5,
-    sheenColor: new THREE.Color("#ffffff").multiplyScalar(0.32),
+    sheenRoughness: 0.7,
+    sheenColor: new THREE.Color("#ffffff").multiplyScalar(0.85),
   },
-  // Cinta: brillo alargado a lo largo de las fibras, como el satén.
+  // Cinta: un brillo suave alargado a lo largo de las fibras, sin llegar a plástico.
   satin: {
     roughness: 1,
+    diffuseRoughness: 0.35,
+    specularIntensity: 0.45,
     normalScale: new THREE.Vector2(0.55, 0.55),
-    sheen: 0.45,
-    sheenRoughness: 0.3,
-    sheenColor: new THREE.Color("#ffffff").multiplyScalar(0.3),
-    specularIntensity: 0.8,
-    anisotropy: 0.55,
+    sheen: 0.6,
+    sheenRoughness: 0.45,
+    sheenColor: new THREE.Color("#ffffff").multiplyScalar(0.6),
+    anisotropy: 0.4,
     anisotropyRotation: Math.PI / 2,
   },
 };
@@ -75,6 +79,22 @@ function patchYarn(shader: ShaderSource, tones: YarnTones | undefined) {
       #endif
       ${tones ? "vYarnSpiral = spiral;" : ""}`,
     );
+
+  // La pelusa dispersa la luz con el color de la fibra (no en blanco) y solo donde hay
+  // fibras: canal azul de la rugosidad. Hacia el borde la textura se ve oblicua y el
+  // mipmap borraría las fibras; el sesgo las mantiene, para que el halo se vea fibroso.
+  shader.fragmentShader = shader.fragmentShader.replace(
+    "#include <lights_physical_fragment>",
+    `#include <lights_physical_fragment>
+    #ifdef USE_SHEEN
+      float yarnFuzz = 1.0;
+      #ifdef USE_ROUGHNESSMAP
+        yarnFuzz = texture(roughnessMap, vRoughnessMapUv, -1.0).b;
+      #endif
+      // En hilos muy oscuros la fibra igual se ve un poco gris: el tinte tiene un mínimo.
+      material.sheenColor *= (0.25 + 0.75 * sqrt(max(diffuseColor.rgb, vec3(0.0)))) * yarnFuzz;
+    #endif`,
+  );
 
   if (!tones) return;
   Object.assign(shader.uniforms, tones);
