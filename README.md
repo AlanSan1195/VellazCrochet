@@ -1,5 +1,7 @@
 # Vellaz Crochet
 
+![Vista de inicio de Vellaz Crochet](reference/home.png)
+
 Vellaz Crochet es un catálogo web interactivo de bolsos tejidos a mano. Creé el proyecto para mostrar los modelos que una clienta teje a crochet y ayudar a quien quiera encargar uno a decidir cómo le gustaría recibirlo.
 
 La idea es que cada persona pueda elegir un bolso, girarlo para apreciar su forma y probar los colores y accesorios disponibles antes de encargarlo. Busco que la vista 3D conserve los detalles que distinguen a los bolsos reales, desde la inclinación de las puntadas hasta el brillo de cada hilo.
